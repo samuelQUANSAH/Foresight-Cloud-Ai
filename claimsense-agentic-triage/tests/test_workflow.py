@@ -27,3 +27,16 @@ def test_uncertain_case_routes_to_human():
     result = run_case(request)
     assert result.needs_human_review is True
     assert result.escalation_reasons
+
+
+def test_pii_outside_clinical_notes_is_escalated():
+    request = CaseRequest(
+        member_id="SSN 123-45-6789",
+        request_type="prior_authorization",
+        procedure="MRI Lumbar Spine",
+        diagnosis="chronic lower back pain with radiating symptoms",
+        clinical_notes="Patient completed 6 weeks of physical therapy.",
+    )
+    result = run_case(request)
+    assert result.needs_human_review is True
+    assert any("PII" in reason for reason in result.escalation_reasons)
