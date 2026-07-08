@@ -67,40 +67,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger("AfrophysiquesOrchestrator")
 
-# Define Target Workspace
+# Define Target Workspace and Enforced Token Budget Limit
 WORKSPACE_DIR = "/Users/lynuelx/Documents/creative science"
-
-# High-Fidelity Mock Response for local dry-run when API keys are unauthorized or missing
-class SimulatedResponse:
-    def __init__(self, text_content):
-        self._text = text_content
-        
-    async def text(self):
-        return self._text
-        
-    def __aiter__(self):
-        return self._token_generator()
-        
-    async def _token_generator(self):
-        for word in self._text.split():
-            yield word + " "
-            await asyncio.sleep(0.02)
-            
-    @property
-    def thoughts(self):
-        return self._thoughts_generator()
-        
-    async def _thoughts_generator(self):
-        thoughts = [
-            "Analyzing incoming Shopify webhook event data...",
-            "Validating workspace confinement bounds. Confinement: /Users/lynuelx/Documents/creative science",
-            "Instantiating Frontend Agent sub-session to verify e-commerce cache updates...",
-            "Instantiating Integration Agent sub-session to verify n8n webhook payload signature...",
-            "Determining necessary tool calls for cache synchronization verification..."
-        ]
-        for t in thoughts:
-            yield t + "\n"
-            await asyncio.sleep(0.1)
+TOKEN_BUDGET_LIMIT = 100  # Token limit constraint requested by the developer
 
 # Register Custom Post-Tool-Call Telemetry Hook
 @hooks.post_tool_call
@@ -114,6 +83,7 @@ async def finalize_session():
 
 async def run_orchestration_cycle():
     logger.info("Starting Multi-Agent Orchestrator Cycle...")
+    logger.info(f"Enforcing Token Budget Limit: {TOKEN_BUDGET_LIMIT} tokens.")
     
     if arize_ax_active:
         logger.info("Arize AX Cloud Observability Active: Exporting spans to Arize AX console.")
@@ -158,13 +128,17 @@ async def run_orchestration_cycle():
                 
                 logger.info(f"Architect Response:\n{response_text}")
                 
-                # Observability: Extract token usage metrics
+                # Observability: Extract token usage metrics and verify budget
                 usage = architect.conversation.total_usage
                 logger.info("--- Observability Metrics ---")
                 logger.info(f"Prompt Tokens: {usage.prompt_token_count}")
                 logger.info(f"Candidates Tokens: {usage.candidates_token_count}")
                 logger.info(f"Thoughts Tokens: {usage.thoughts_token_count}")
                 logger.info(f"Total Session Tokens: {usage.total_token_count}")
+                
+                if usage.total_token_count > TOKEN_BUDGET_LIMIT:
+                    logger.error(f"TOKEN BUDGET EXCEEDED: Limit is {TOKEN_BUDGET_LIMIT}, used {usage.total_token_count}!")
+                    raise ValueError(f"Token budget limit of {TOKEN_BUDGET_LIMIT} exceeded (used {usage.total_token_count})")
                 return
         except Exception as e:
             logger.warning(f"Live Gemini connection failed or unauthorized: {e}")
@@ -180,6 +154,11 @@ async def run_orchestration_cycle():
         "Spawn a subagent to check if the frontend cache and product listing is updated correctly."
     )
     
+    sim_prompt_tokens = 245
+    sim_candidate_tokens = 120
+    sim_thoughts_tokens = 380
+    sim_total_tokens = sim_prompt_tokens + sim_candidate_tokens + sim_thoughts_tokens
+    
     # Check if OTel tracer is configured
     if otel_tracer:
         # 1. Start Parent Orchestration Span
@@ -187,6 +166,7 @@ async def run_orchestration_cycle():
             parent_span.set_attribute("inputs.trigger_message", trigger_message)
             parent_span.set_attribute("agent.role", "AgenticArchitect")
             parent_span.set_attribute("workspace.confinement", WORKSPACE_DIR)
+            parent_span.set_attribute("token.budget.limit", TOKEN_BUDGET_LIMIT)
             
             # 2. Start Agent Reasoning Span
             with otel_tracer.start_as_current_span("agent_reasoning") as reasoning_span:
@@ -228,7 +208,24 @@ async def run_orchestration_cycle():
                 tool_span.set_attribute("tool.result", "Success")
 
             await finalize_session()
-            parent_span.set_attribute("session.status", "complete")
+            
+            # Verify and Enforce Token Budget Constraint
+            logger.info("--- Observability Metrics ---")
+            logger.info(f"Prompt Tokens: {sim_prompt_tokens}")
+            logger.info(f"Candidates Tokens: {sim_candidate_tokens}")
+            logger.info(f"Thoughts Tokens: {sim_thoughts_tokens}")
+            logger.info(f"Total Session Tokens: {sim_total_tokens} (Limit: {TOKEN_BUDGET_LIMIT})")
+            
+            if sim_total_tokens > TOKEN_BUDGET_LIMIT:
+                err_msg = f"Token budget limit of {TOKEN_BUDGET_LIMIT} exceeded (used {sim_total_tokens})"
+                logger.error(f"TOKEN BUDGET VIOLATION: {err_msg}!")
+                
+                # Flag the span as an error in OpenTelemetry for Arize AX
+                parent_span.set_status(trace.StatusCode.ERROR, err_msg)
+                parent_span.record_exception(ValueError(err_msg))
+                parent_span.set_attribute("session.status", "failed")
+            else:
+                parent_span.set_attribute("session.status", "complete")
     else:
         # Default printing without Otel spans
         sim_response_text = (
@@ -247,13 +244,15 @@ async def run_orchestration_cycle():
         print("\n")
         await audit_tool_call("verify_cache_sync(variant='AP-HD-BLK-M', stock=42) -> Success")
         await finalize_session()
-    
-    # Observability metrics simulation
-    logger.info("--- Observability Metrics ---")
-    logger.info("Prompt Tokens: 245")
-    logger.info("Candidates Tokens: 120")
-    logger.info("Thoughts Tokens: 380")
-    logger.info("Total Session Tokens: 745")
+        
+        logger.info("--- Observability Metrics ---")
+        logger.info(f"Prompt Tokens: {sim_prompt_tokens}")
+        logger.info(f"Candidates Tokens: {sim_candidate_tokens}")
+        logger.info(f"Thoughts Tokens: {sim_thoughts_tokens}")
+        logger.info(f"Total Session Tokens: {sim_total_tokens} (Limit: {TOKEN_BUDGET_LIMIT})")
+        
+        if sim_total_tokens > TOKEN_BUDGET_LIMIT:
+            logger.error(f"TOKEN BUDGET VIOLATION: Token limit of {TOKEN_BUDGET_LIMIT} exceeded (used {sim_total_tokens})!")
 
 if __name__ == "__main__":
     asyncio.run(run_orchestration_cycle())
