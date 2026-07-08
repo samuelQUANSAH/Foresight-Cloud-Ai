@@ -1,4 +1,3 @@
-# GitHub Actions Build Sync Verification Tracking Comment
 import os
 import sys
 import logging
@@ -15,6 +14,19 @@ try:
     load_dotenv()
 except ImportError:
     pass
+
+# Initialize Arize Phoenix LLM Observability & Tracing
+try:
+    import phoenix as px
+    from phoenix.otel import register
+    
+    # Launch local Phoenix dashboard server (collector on port 6006)
+    px.launch_app()
+    # Configure OpenTelemetry to trace and log events
+    register(project_name="afrophysiques-agentic-orchestrator")
+    phoenix_active = True
+except Exception as e:
+    phoenix_active = False
 
 from google.antigravity import Agent, LocalAgentConfig, types
 from google.antigravity.hooks import hooks, policy
@@ -82,6 +94,11 @@ async def finalize_session():
 async def run_orchestration_cycle():
     logger.info("Starting Multi-Agent Orchestrator Cycle...")
     
+    if phoenix_active:
+        logger.info("Arize Phoenix Observability Active: Tracing spans to local dashboard.")
+    else:
+        logger.warning("Arize Phoenix Observability could not be initialized.")
+
     # Configure Safety policies
     safety_policies = [
         policy.workspace_only([WORKSPACE_DIR]),
