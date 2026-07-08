@@ -15,18 +15,32 @@ try:
 except ImportError:
     pass
 
-# Initialize Arize Phoenix LLM Observability & Tracing
+# Initialize Arize AX Cloud (Enterprise) or Local Phoenix Observability Tracing
+phoenix_active = False
+arize_ax_active = False
+
 try:
-    import phoenix as px
-    from phoenix.otel import register
+    arize_space_id = os.environ.get("ARIZE_SPACE_ID")
+    arize_api_key = os.environ.get("ARIZE_API_KEY")
     
-    # Launch local Phoenix dashboard server (collector on port 6006)
-    px.launch_app()
-    # Configure OpenTelemetry to trace and log events
-    register(project_name="afrophysiques-agentic-orchestrator")
-    phoenix_active = True
+    if arize_space_id and arize_api_key:
+        # Instrument for Arize AX Cloud platform
+        from arize.otel import register as register_arize
+        register_arize(
+            space_id=arize_space_id,
+            api_key=arize_api_key,
+            project_name="afrophysiques-agentic-orchestrator"
+        )
+        arize_ax_active = True
+    else:
+        # Fallback to local open-source Arize Phoenix dashboard
+        import phoenix as px
+        from phoenix.otel import register as register_phoenix
+        px.launch_app()
+        register_phoenix(project_name="afrophysiques-agentic-orchestrator")
+        phoenix_active = True
 except Exception as e:
-    phoenix_active = False
+    pass
 
 from google.antigravity import Agent, LocalAgentConfig, types
 from google.antigravity.hooks import hooks, policy
@@ -94,10 +108,12 @@ async def finalize_session():
 async def run_orchestration_cycle():
     logger.info("Starting Multi-Agent Orchestrator Cycle...")
     
-    if phoenix_active:
-        logger.info("Arize Phoenix Observability Active: Tracing spans to local dashboard.")
+    if arize_ax_active:
+        logger.info("Arize AX Cloud Observability Active: Exporting spans to Arize AX console.")
+    elif phoenix_active:
+        logger.info("Arize Phoenix Local Observability Active: Tracing spans to local dashboard.")
     else:
-        logger.warning("Arize Phoenix Observability could not be initialized.")
+        logger.warning("Arize Observability could not be initialized.")
 
     # Configure Safety policies
     safety_policies = [
