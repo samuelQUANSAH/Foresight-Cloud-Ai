@@ -71,6 +71,38 @@ logger = logging.getLogger("AfrophysiquesOrchestrator")
 WORKSPACE_DIR = "/Users/lynuelx/Documents/creative science"
 TOKEN_BUDGET_LIMIT = 100  # Token limit constraint requested by the developer
 
+# High-Fidelity Mock Response for local dry-run when API keys are unauthorized or missing
+class SimulatedResponse:
+    def __init__(self, text_content):
+        self._text = text_content
+        
+    async def text(self):
+        return self._text
+        
+    def __aiter__(self):
+        return self._token_generator()
+        
+    async def _token_generator(self):
+        for word in self._text.split():
+            yield word + " "
+            await asyncio.sleep(0.02)
+            
+    @property
+    def thoughts(self):
+        return self._thoughts_generator()
+        
+    async def _thoughts_generator(self):
+        thoughts = [
+            "Analyzing incoming Shopify webhook event data...",
+            "Validating workspace confinement bounds. Confinement: /Users/lynuelx/Documents/creative science",
+            "Instantiating Frontend Agent sub-session to verify e-commerce cache updates...",
+            "Instantiating Integration Agent sub-session to verify n8n webhook payload signature...",
+            "Determining necessary tool calls for cache synchronization verification..."
+        ]
+        for t in thoughts:
+            yield t + "\n"
+            await asyncio.sleep(0.1)
+
 # Register Custom Post-Tool-Call Telemetry Hook
 @hooks.post_tool_call
 async def audit_tool_call(tool_call_result):
