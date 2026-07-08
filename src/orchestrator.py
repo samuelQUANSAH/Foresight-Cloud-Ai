@@ -42,6 +42,13 @@ try:
 except Exception as e:
     pass
 
+# Import OpenTelemetry APIs for manual tracing
+try:
+    from opentelemetry import trace
+    otel_tracer = trace.get_tracer("afrophysiques-orchestrator")
+except ImportError:
+    otel_tracer = None
+
 from google.antigravity import Agent, LocalAgentConfig, types
 from google.antigravity.hooks import hooks, policy
 
@@ -165,31 +172,81 @@ async def run_orchestration_cycle():
 
     # Local Simulated High-Fidelity Runner
     logger.info("--- LOCAL RUNNER (SIMULATION MODE) ---")
-    logger.info("Running simulated reasoning chain...")
+    logger.info("Generating OpenTelemetry spans for trace export...")
     
-    sim_response_text = (
-        "Architect Actions:\n"
-        "1. Spawned Frontend Agent: Verified product listing for 'Afrophysiques Signature Hoodie' updated correctly in catalog.\n"
-        "2. Spawned Integration Agent: Verified webhook signature HMAC matches local secret.\n"
-        "3. Synchronized cache storage. Product stock updated to 42 successfully."
+    # Define trigger message for simulation
+    trigger_message = (
+        "Received Shopify Webhook Event via n8n: Variant AP-HD-BLK-M updated stock to 42. "
+        "Spawn a subagent to check if the frontend cache and product listing is updated correctly."
     )
     
-    sim = SimulatedResponse(sim_response_text)
-    
-    # Print thoughts
-    logger.info("Agent Thoughts:")
-    async for thought in sim.thoughts:
-         print(f"  [Thought] {thought.strip()}")
-         
-    # Print tokens response
-    logger.info("Agent Streaming Response:")
-    async for token in sim:
-         print(token, end="", flush=True)
-    print("\n")
-    
-    # Audit log entry simulation
-    await audit_tool_call("verify_cache_sync(variant='AP-HD-BLK-M', stock=42) -> Success")
-    await finalize_session()
+    # Check if OTel tracer is configured
+    if otel_tracer:
+        # 1. Start Parent Orchestration Span
+        with otel_tracer.start_as_current_span("run_orchestration_cycle") as parent_span:
+            parent_span.set_attribute("inputs.trigger_message", trigger_message)
+            parent_span.set_attribute("agent.role", "AgenticArchitect")
+            parent_span.set_attribute("workspace.confinement", WORKSPACE_DIR)
+            
+            # 2. Start Agent Reasoning Span
+            with otel_tracer.start_as_current_span("agent_reasoning") as reasoning_span:
+                reasoning_span.set_attribute("model.name", "gemini-3.5-flash")
+                logger.info("Agent Thoughts:")
+                sim_response_text = (
+                    "Architect Actions:\n"
+                    "1. Spawned Frontend Agent: Verified product listing for 'Afrophysiques Signature Hoodie' updated correctly in catalog.\n"
+                    "2. Spawned Integration Agent: Verified webhook signature HMAC matches local secret.\n"
+                    "3. Synchronized cache storage. Product stock updated to 42 successfully."
+                )
+                sim = SimulatedResponse(sim_response_text)
+                
+                async for thought in sim.thoughts:
+                    print(f"  [Thought] {thought.strip()}")
+                    reasoning_span.add_event("thought_generation", {"thought": thought.strip()})
+            
+            # 3. Start Frontend Agent Sub-Task Span
+            with otel_tracer.start_as_current_span("frontend_agent_execution") as fe_span:
+                fe_span.set_attribute("subagent.role", "FrontendAgent")
+                fe_span.set_attribute("task.target", "index.html")
+                logger.info("Agent Streaming Response:")
+                async for token in sim:
+                    print(token, end="", flush=True)
+                print("\n")
+                fe_span.add_event("frontend_cache_check", {"status": "success", "file": "index.html"})
+                
+            # 4. Start Integration Agent Sub-Task Span
+            with otel_tracer.start_as_current_span("integration_agent_execution") as int_span:
+                int_span.set_attribute("subagent.role", "ShopifyIntegrationAgent")
+                int_span.set_attribute("webhook.event", "inventory_levels/update")
+                int_span.add_event("hmac_validation", {"verified": True})
+                
+            # 5. Start Tool Execution Span
+            with otel_tracer.start_as_current_span("tool_call_verify_cache_sync") as tool_span:
+                tool_span.set_attribute("tool.name", "verify_cache_sync")
+                tool_span.set_attribute("tool.arguments", "variant='AP-HD-BLK-M', stock=42")
+                await audit_tool_call("verify_cache_sync(variant='AP-HD-BLK-M', stock=42) -> Success")
+                tool_span.set_attribute("tool.result", "Success")
+
+            await finalize_session()
+            parent_span.set_attribute("session.status", "complete")
+    else:
+        # Default printing without Otel spans
+        sim_response_text = (
+            "Architect Actions:\n"
+            "1. Spawned Frontend Agent: Verified product listing for 'Afrophysiques Signature Hoodie' updated correctly in catalog.\n"
+            "2. Spawned Integration Agent: Verified webhook signature HMAC matches local secret.\n"
+            "3. Synchronized cache storage. Product stock updated to 42 successfully."
+        )
+        sim = SimulatedResponse(sim_response_text)
+        logger.info("Agent Thoughts:")
+        async for thought in sim.thoughts:
+             print(f"  [Thought] {thought.strip()}")
+        logger.info("Agent Streaming Response:")
+        async for token in sim:
+             print(token, end="", flush=True)
+        print("\n")
+        await audit_tool_call("verify_cache_sync(variant='AP-HD-BLK-M', stock=42) -> Success")
+        await finalize_session()
     
     # Observability metrics simulation
     logger.info("--- Observability Metrics ---")
